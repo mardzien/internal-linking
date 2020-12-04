@@ -20,9 +20,13 @@ import pandas as pd
 import spacy
 from spacy.matcher import PhraseMatcher
 import openpyxl
+import time
 
 from scrape import get_information_from_soup
 import files
+
+
+overall_start = time.time()
 
 
 def append_list_to_excel(filename, list_name, sheet_name):
@@ -110,66 +114,90 @@ def append_df_to_excel(filename, df, sheet_name='Sheet1', startrow=None,
     # save the workbook
     writer.save()
 
+
 # Załadowanie silnika spacy
+nlp_start = time.time()
 nlp = spacy.load("pl_core_news_sm")
+nlp_end = time.time()
+nlp_time = nlp_end - nlp_start
+print(f"Wczytano silnik nlp w {nlp_time} s.")
+
 
 # dane wejściowe
-url_list = files.load_file_to_list("Input/url_list.txt")
-phrase_database = pd.read_excel("Input/Raport Pozycje - medifem.pl.xlsx")
+url_list = files.load_file_to_list("Input/url_list2.txt")
+phrase_database = pd.read_excel("Input/Morele.xlsx", sheet_name="Ahrefs", engine="openpyxl", )
 
 
 df_row = pd.DataFrame(columns=['URL źródłowy',
                                'URL docelowy',
                                'Słowo kluczowe',
-                               'Kontekst'])
+                               'Kontekst', ])
 
-with pd.ExcelWriter('Output/Raport linkowania.xlsx') as writer:
+with pd.ExcelWriter('Output/Raport linkowania.xlsx', ) as writer:
     df_row.to_excel(writer, sheet_name='Raport')
 
 
 # funkcja zwracająca podstawową formę danej frazy
 def lemmatizer(phrase):
-    doc = nlp(phrase['Słowo kluczowe'])
+    doc = nlp(str(phrase['Słowo kluczowe']))    # rzutowanie na stringa. Wartości liczbowe mogą być wczytywane jako float.
     result = ""
     for token in doc:
         result += f"{token.lemma_} "
     return result[:-1]
 
 
+lemmatizer_start = time.time()
 # Za pomocą ww funkcji dodajemy nową kolumnę z podstawową formą frazy
 phrase_database['Lemma'] = phrase_database.apply(lemmatizer, axis=1)
+print("Stworzono df z frazami lemma.")
+phrase_database = phrase_database.drop_duplicates(subset=['URL', 'Lemma'])
+phrase_database.to_excel("Lemmas.xlsx")
+
+lemmatizer_end = time.time()
+lemmatizer_time = lemmatizer_end - lemmatizer_start
 
 
 def create_inlinks_report(source_url_list, database_df, input_class):
 
     counter = 0
     # wyodrębnienie wszystkich docelowych URLi
-    destination_url_list = phrase_database['URL'].unique()
+    destination_url_list = database_df['URL'].unique()
 
-    for url in source_url_list:
+    tokenization_time = 0
+    finding_match_time = 0
+    writing_to_excel_time = 0
+    for ii, url in enumerate(source_url_list):
+        tokenization_start = time.time()
+        print(f'URL {ii} z {len(source_url_list)}')
+        print(f'Zapisano {counter} wierszy w raporcie.')
         url_info = get_information_from_soup(url=url, input_class=input_class)
         tekst = url_info['Tekst']
 
-        print(tekst)
-
+        # print(tekst)
         document = nlp(tekst)
+        tokenization_stop = time.time()
+        tokenization_time += tokenization_stop - tokenization_start
 
         for d_url in destination_url_list:
+            finding_match_time_start = time.time()
             if url == d_url:
-                continue
+                continue    # przerwanie pętli, żeby nie szukać dopasowań na siebie.
             # zainicjowanie pustego matchera z atrubutem lemma - szuka podstawowych form dla każdego tokenu
             matcher = PhraseMatcher(nlp.vocab, attr="LEMMA")
             # zrzutowanie fraz przyporządkowanych do danego URLa na urla
-            phrase_list = list(phrase_database['Lemma'][phrase_database['URL'] == d_url])
+            phrase_list = list(database_df['Lemma'][database_df['URL'] == d_url])
             # tworzenie patternów na podstawie silnika nlp
             phrase_patterns = [nlp(text) for text in phrase_list]
             matcher.add('Szukacz', None, *phrase_patterns)
 
             # tworzymy obiekt ze znalezionymi (lub nie) frazami w tekście
             found_matches = matcher(document)
-            print('***************')
-            print(len(found_matches))
+            finding_match_time_stop = time.time()
+            finding_match_time += finding_match_time_stop - finding_match_time_start
+            # print('***************')
+            # print(len(found_matches))
 
+            writing_to_excel_start = time.time()
             if len(found_matches) != 0:
 
                 for match_id, start, end in found_matches:  # tuple unpacking - potrzebujemy tylko start oraz end
@@ -183,8 +211,8 @@ def create_inlinks_report(source_url_list, database_df, input_class):
                                 'Kontekst': span.text}
                     list_row = [url, d_url, phrase.text, span.text]
                     # df_row = pd.DataFrame([url, d_url, phrase.text, span.text]).transpose()
-                    print(dict_row)
-                    print(df_row)
+                    # print(dict_row)
+                    # print(df_row)
 
                     # mechanizm dopisujący dane do istniejącego excela
                     # with pd.ExcelWriter('Output/Raport linkowania.xlsx', engine='openpyxl', mode='a') as writer:
@@ -192,6 +220,22 @@ def create_inlinks_report(source_url_list, database_df, input_class):
                     # append_df_to_excel(filename='Output/Raport linkowania.xlsx', df=df_row, sheet_name='Raport', )
                     append_list_to_excel(filename='Output/Raport linkowania.xlsx', list_name=list_row,
                                          sheet_name='Raport')
+            writing_to_excel_stop = time.time()
+            writing_to_excel_time += writing_to_excel_stop - writing_to_excel_start
+
+    return tokenization_time, finding_match_time, writing_to_excel_time
 
 
-create_inlinks_report(url_list, phrase_database, input_class='page-content')
+tokenization_time, finding_match_time, writing_to_excel_time =\
+    create_inlinks_report(url_list, phrase_database, input_class='single-news-content')
+
+
+overall_stop = time.time()
+overall_time = overall_stop - overall_start
+
+print(f"Całkowity czas działania: {overall_time} s.")
+print(f"Czas wczytania silnika nlp: {nlp_time} s.")
+print(f"Czas stworzenia kolumny z podstawową formą frazy: {lemmatizer_time} s.")
+print(f"Czas wczytania tekstu z URLa wraz z tokenizacją: {tokenization_time} s.")
+print(f"Czas działania matchera: {finding_match_time} s.")
+print(f"Czas zapisytania do excela: {writing_to_excel_time} s.")
