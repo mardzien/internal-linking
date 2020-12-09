@@ -125,7 +125,7 @@ print(f"Wczytano silnik nlp w {nlp_time} s.")
 
 # dane wejściowe
 url_list = files.load_file_to_list("Input/url_list2.txt")
-phrase_database = pd.read_excel("Input/Morele.xlsx", sheet_name="Ahrefs", engine="openpyxl", )
+phrase_database = pd.read_excel("Input/lasercenter.xlsx", engine="openpyxl", )
 
 
 df_row = pd.DataFrame(columns=['URL źródłowy',
@@ -227,7 +227,7 @@ def create_inlinks_report(source_url_list, database_df, input_class):
 
 
 tokenization_time, finding_match_time, writing_to_excel_time =\
-    create_inlinks_report(url_list, phrase_database, input_class='single-news-content')
+    create_inlinks_report(url_list, phrase_database, input_class='entry-content')
 
 
 overall_stop = time.time()
