@@ -18,6 +18,12 @@
     $ conda activate internal-linking
 ```
 
+### Download Polish language for `spacy`
+
+```
+    $ python -m spacy download pl_core_news_sm
+```
+
 ## Jupyter Lab
 
 ### Running
