@@ -24,10 +24,14 @@ import time
 
 from scrape import get_information_from_soup
 import files
+from openpyxl import load_workbook
 
+import pandas as pd
 
 overall_start = time.time()
 
+
+# TODO: Excel and dataframe part
 
 def append_list_to_excel(filename, list_name, sheet_name):
     columns = "BCDE"
@@ -38,7 +42,7 @@ def append_list_to_excel(filename, list_name, sheet_name):
     for i, column in enumerate(columns):
         sheet[f'{column}{row_number+1}'] = list_name[i]
     wb.save(filename)
-    
+
 
 def append_df_to_excel(filename, df, sheet_name='Sheet1', startrow=None,
                        truncate_sheet=False,
@@ -64,22 +68,12 @@ def append_df_to_excel(filename, df, sheet_name='Sheet1', startrow=None,
 
     Returns: None
     """
-    from openpyxl import load_workbook
-
-    import pandas as pd
 
     # ignore [engine] parameter if it was passed
     if 'engine' in to_excel_kwargs:
         to_excel_kwargs.pop('engine')
 
     writer = pd.ExcelWriter(filename, engine='openpyxl')
-
-    # Python 2.x: define [FileNotFoundError] exception if it doesn't exist
-    try:
-        FileNotFoundError
-    except NameError:
-        FileNotFoundError = IOError
-
 
     try:
         # try to open an existing workbook
@@ -115,6 +109,7 @@ def append_df_to_excel(filename, df, sheet_name='Sheet1', startrow=None,
     writer.save()
 
 
+# TODO: Jaki to silnik -> dokładne określenie
 # Załadowanie silnika spacy
 nlp_start = time.time()
 nlp = spacy.load("pl_core_news_sm")
@@ -122,11 +117,9 @@ nlp_end = time.time()
 nlp_time = nlp_end - nlp_start
 print(f"Wczytano silnik nlp w {nlp_time} s.")
 
-
 # dane wejściowe
 url_list = files.load_file_to_list("Input/url_list2.txt")
-phrase_database = pd.read_excel("Input/lasercenter.xlsx", engine="openpyxl", )
-
+phrase_database = pd.read_excel("Input/asd.xlsx", engine="openpyxl", )
 
 df_row = pd.DataFrame(columns=['URL źródłowy',
                                'URL docelowy',
@@ -147,69 +140,90 @@ def lemmatizer(phrase):
 
 
 lemmatizer_start = time.time()
+
+
 # Za pomocą ww funkcji dodajemy nową kolumnę z podstawową formą frazy
 phrase_database['Lemma'] = phrase_database.apply(lemmatizer, axis=1)
-print("Stworzono df z frazami lemma.")
 phrase_database = phrase_database.drop_duplicates(subset=['URL', 'Lemma'])
 phrase_database.to_excel("Lemmas.xlsx")
+
+print("Stworzono df z frazami lemma.")
 
 lemmatizer_end = time.time()
 lemmatizer_time = lemmatizer_end - lemmatizer_start
 
 
 def create_inlinks_report(source_url_list, database_df, input_class):
-
     counter = 0
+
     # wyodrębnienie wszystkich docelowych URLi
     destination_url_list = database_df['URL'].unique()
 
+    # TODO: Determine shared state between processes
     tokenization_time = 0
     finding_match_time = 0
     writing_to_excel_time = 0
-    for ii, url in enumerate(source_url_list):
-        tokenization_start = time.time()
-        print(f'URL {ii} z {len(source_url_list)}')
-        print(f'Zapisano {counter} wierszy w raporcie.')
-        url_info = get_information_from_soup(url=url, input_class=input_class)
-        tekst = url_info['Tekst']
+    urls_count = len(source_url_list)
+    urls = source_url_list
 
-        # print(tekst)
-        document = nlp(tekst)
+    for url_idx, url in enumerate(urls):
+        tokenization_start = time.time()
+
+        print(f'URL {url_idx} z {urls_count}')
+        print(f'Zapisano {counter} wierszy w raporcie.')
+
+        url_info = get_information_from_soup(url=url, input_class=input_class)
+        text = url_info['Tekst']
+
+        document = nlp(text)
+
         tokenization_stop = time.time()
-        tokenization_time += tokenization_stop - tokenization_start
+        tokenization_delta = tokenization_stop - tokenization_start
+        print("Tokenization delta:", tokenization_delta)
+        tokenization_time += tokenization_delta
 
         for d_url in destination_url_list:
+            # TODO: Context of measuring finding a match
             finding_match_time_start = time.time()
             if url == d_url:
                 continue    # przerwanie pętli, żeby nie szukać dopasowań na siebie.
+
+            # zrzutowanie fraz przyporządkowanych do danego URLa na urla
+            # tworzenie patternów na podstawie silnika nlp
+            # TODO: LOCK?
+            # TODO: Jak to działa? Wygląda na filtrowanie
+            phrase_list = list(database_df['Lemma'][database_df['URL'] == d_url])
+            phrase_patterns = [nlp(text) for text in phrase_list]
+
             # zainicjowanie pustego matchera z atrubutem lemma - szuka podstawowych form dla każdego tokenu
             matcher = PhraseMatcher(nlp.vocab, attr="LEMMA")
-            # zrzutowanie fraz przyporządkowanych do danego URLa na urla
-            phrase_list = list(database_df['Lemma'][database_df['URL'] == d_url])
-            # tworzenie patternów na podstawie silnika nlp
-            phrase_patterns = [nlp(text) for text in phrase_list]
+            # TODO: A może macher powinien mieć id = d_url i nie musimy go inicjalizować za każdym razem w pętli?
             matcher.add('Szukacz', None, *phrase_patterns)
 
             # tworzymy obiekt ze znalezionymi (lub nie) frazami w tekście
             found_matches = matcher(document)
             finding_match_time_stop = time.time()
             finding_match_time += finding_match_time_stop - finding_match_time_start
-            # print('***************')
-            # print(len(found_matches))
+            # TODO: Close context of measuring finding a match
 
+            # TODO: Context of measuring writing to excel (writing what?)
             writing_to_excel_start = time.time()
             if len(found_matches) != 0:
 
+                # TODO: Looks like match_id is not used anywhere
                 for match_id, start, end in found_matches:  # tuple unpacking - potrzebujemy tylko start oraz end
                     counter += 1
                     phrase = document[start:end]     # fraza pokrewna znaleziona w tekście
                     span = document[start - 5:end + 6]   # tworzenie kontekstu dla znalezionej frazy
 
-                    dict_row = {'URL źródłowy': url,
-                                'URL docelowy': d_url,
-                                'Słowo kluczowe': phrase.text,
-                                'Kontekst': span.text}
+                    # TODO: Figure out what was the point of creating this?
+                    # dict_row = {'URL źródłowy': url,
+                    #             'URL docelowy': d_url,
+                    #             'Słowo kluczowe': phrase.text,
+                    #             'Kontekst': span.text}
+
                     list_row = [url, d_url, phrase.text, span.text]
+
                     # df_row = pd.DataFrame([url, d_url, phrase.text, span.text]).transpose()
                     # print(dict_row)
                     # print(df_row)
@@ -218,10 +232,15 @@ def create_inlinks_report(source_url_list, database_df, input_class):
                     # with pd.ExcelWriter('Output/Raport linkowania.xlsx', engine='openpyxl', mode='a') as writer:
                     #     df_row.to_excel(writer, sheet_name='Raport', )
                     # append_df_to_excel(filename='Output/Raport linkowania.xlsx', df=df_row, sheet_name='Raport', )
-                    append_list_to_excel(filename='Output/Raport linkowania.xlsx', list_name=list_row,
+
+                    # TODO: LOCK
+                    append_list_to_excel(filename='Output/Raport linkowania.xlsx',
+                                         list_name=list_row,
                                          sheet_name='Raport')
+
             writing_to_excel_stop = time.time()
             writing_to_excel_time += writing_to_excel_stop - writing_to_excel_start
+            # TODO: End context of measuring writing to excel (writing what?)
 
     return tokenization_time, finding_match_time, writing_to_excel_time
 
