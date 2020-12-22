@@ -10,3 +10,4 @@ dependencies:
   - jupyterlab==2.2.9
   - pip:
       - bs4==0.0.1
+      - lxml==4.6.2
