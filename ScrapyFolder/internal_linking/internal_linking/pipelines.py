@@ -9,6 +9,7 @@ from itemadapter import ItemAdapter
 
 
 class InternalLinkingPipeline:
+
     def process_item(self, item, spider):
         if item['Text']:
             result = ""
