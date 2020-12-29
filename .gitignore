@@ -1,10 +1,10 @@
 __pycache__/
 /.idea/
 /.ipynb_checkpoints/
-
-__pycache__
-/.idea
+.DS_Store
 
 venv
 Input
+Input1
 Output
+Tmp
