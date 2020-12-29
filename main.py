@@ -27,6 +27,8 @@ from scrape import get_information_from_soup
 import files
 from openpyxl import load_workbook
 
+import multiprocessing as mp
+
 
 def load_nlp_model(name: str):
     """
@@ -163,82 +165,115 @@ def append_df_to_excel(filename, df, sheet_name='Sheet1', startrow=None,
     # save the workbook
     writer.save()
 
+# TODO: The function name is bad, because it doesn't tell too much about what it's doing FIXME.
+
+
+def process_url(nlp_model, database_df, destination_url_list, input_class, url):
+    tokenization_start = time.time()
+
+    # print(f'URL {url_idx} z {urls_count}')
+    # print(f'Zapisano {counter} wierszy w raporcie.')
+
+    # http_start = time.time()
+    url_info = get_information_from_soup(url=url, input_class=input_class)
+    # http_stop = time.time()
+    # http_delta = http_stop - http_start
+    # print(f"HTTP DELTA: {http_delta}s")
+    text = url_info['Tekst']
+
+    document = nlp_model(text)
+
+    # tokenization_stop = time.time()
+    # tokenization_delta = tokenization_stop - tokenization_start
+    # print("Tokenization delta:", tokenization_delta)
+    # tokenization_time += tokenization_delta
+
+    for d_url in destination_url_list:
+        # TODO: Context of measuring finding a match
+        # finding_match_time_start = time.time()
+
+        if url == d_url:
+            continue  # przerwanie pętli, żeby nie szukać dopasowań na siebie.
+
+        # zrzutowanie fraz przyporządkowanych do danego URLa na urla
+        # tworzenie patternów na podstawie silnika nlp
+        phrase_list = list(database_df['Lemma'][database_df['URL'] == d_url])
+        phrase_patterns = [nlp_model(text) for text in phrase_list]
+
+        # zainicjowanie pustego matchera z atrubutem lemma - szuka podstawowych form dla każdego tokenu
+        matcher = PhraseMatcher(nlp_model.vocab, attr="LEMMA")
+        # TODO: A może matcher powinien mieć id = d_url i nie musimy go inicjalizować za każdym razem w pętli?
+        matcher.add('Szukacz', None, *phrase_patterns)
+
+        # tworzymy obiekt ze znalezionymi (lub nie) frazami w tekście
+        found_matches = matcher(document)
+        # finding_match_time_stop = time.time()
+        # finding_match_time += finding_match_time_stop - finding_match_time_start
+        # TODO: Close context of measuring finding a match
+
+        # TODO: Context of measuring writing to excel (writing what?)
+        # writing_to_excel_start = time.time()
+
+        if len(found_matches) == 0:
+            pass
+        else:
+            # TODO: Looks like match_id is not used anywhere
+            rows = []
+            for match_id, start, end in found_matches:  # tuple unpacking - potrzebujemy tylko start oraz end
+                # TODO: lock! Removed counter for now to simplify the process
+
+                phrase = document[start:end]  # fraza pokrewna znaleziona w tekście
+                span = document[start - 5:end + 6]  # tworzenie kontekstu dla znalezionej frazy
+
+                # TODO: Probably the result of incoming process
+                list_row = [url, d_url, phrase.text, span.text]
+                rows.append(list_row)
+
+                # TODO: LOCK or send to synchronized queue
+                # append_list_to_excel(filename='Output/Raport linkowania.xlsx',
+                #                      list_name=list_row,
+                #                      sheet_name='Raport')
+
+        # writing_to_excel_stop = time.time()
+        # writing_to_excel_time += writing_to_excel_stop - writing_to_excel_start
+        # TODO: End context of measuring writing to excel (writing what?)
+
+
+
+# append_list_to_excel(filename='Output/Raport linkowania.xlsx',
+#                      list_name=list_row,
+#                      sheet_name='Raport')
+
 
 def create_inlinks_report(nlp_model, source_url_list, database_df, input_class):
-    counter = 0
+    # counter = 0
 
     # wyodrębnienie wszystkich docelowych URLi
     destination_url_list = database_df['URL'].unique()
 
     # TODO: Determine shared state between processes
-    tokenization_time = 0
-    finding_match_time = 0
-    writing_to_excel_time = 0
-    urls_count = len(source_url_list)
-    urls = source_url_list
+    # tokenization_time = 0
+    # finding_match_time = 0
+    # writing_to_excel_time = 0
 
-    for url_idx, url in enumerate(urls):
-        tokenization_start = time.time()
+    target = partial(
+        process_url,
+        nlp_model, database_df, destination_url_list, input_class
+    )
 
-        print(f'URL {url_idx} z {urls_count}')
-        print(f'Zapisano {counter} wierszy w raporcie.')
+    proc_num = mp.cpu_count() - 1
 
-        url_info = get_information_from_soup(url=url, input_class=input_class)
-        text = url_info['Tekst']
+    # results = list(map(target, source_url_list))
 
-        document = nlp_model(text)
+    mp.set_start_method('spawn', True)
 
-        tokenization_stop = time.time()
-        tokenization_delta = tokenization_stop - tokenization_start
-        print("Tokenization delta:", tokenization_delta)
-        tokenization_time += tokenization_delta
+    with mp.Pool(8) as p:
+        results = p.map(target, source_url_list)
 
-        for d_url in destination_url_list:
-            # TODO: Context of measuring finding a match
-            finding_match_time_start = time.time()
-            if url == d_url:
-                continue    # przerwanie pętli, żeby nie szukać dopasowań na siebie.
+    print(f'Processed {len(results)} results')
 
-            # zrzutowanie fraz przyporządkowanych do danego URLa na urla
-            # tworzenie patternów na podstawie silnika nlp
-            # TODO: LOCK?
-            # TODO: Jak to działa? Wygląda na filtrowanie
-            phrase_list = list(database_df['Lemma'][database_df['URL'] == d_url])
-            phrase_patterns = [nlp_model(text) for text in phrase_list]
-
-            # zainicjowanie pustego matchera z atrubutem lemma - szuka podstawowych form dla każdego tokenu
-            matcher = PhraseMatcher(nlp_model.vocab, attr="LEMMA")
-            # TODO: A może matcher powinien mieć id = d_url i nie musimy go inicjalizować za każdym razem w pętli?
-            matcher.add('Szukacz', None, *phrase_patterns)
-
-            # tworzymy obiekt ze znalezionymi (lub nie) frazami w tekście
-            found_matches = matcher(document)
-            finding_match_time_stop = time.time()
-            finding_match_time += finding_match_time_stop - finding_match_time_start
-            # TODO: Close context of measuring finding a match
-
-            # TODO: Context of measuring writing to excel (writing what?)
-            writing_to_excel_start = time.time()
-            if len(found_matches) != 0:
-
-                # TODO: Looks like match_id is not used anywhere
-                for match_id, start, end in found_matches:  # tuple unpacking - potrzebujemy tylko start oraz end
-                    counter += 1
-                    phrase = document[start:end]            # fraza pokrewna znaleziona w tekście
-                    span = document[start - 5:end + 6]      # tworzenie kontekstu dla znalezionej frazy
-
-                    list_row = [url, d_url, phrase.text, span.text]
-
-                    # TODO: LOCK
-                    append_list_to_excel(filename='Output/Raport linkowania.xlsx',
-                                         list_name=list_row,
-                                         sheet_name='Raport')
-
-            writing_to_excel_stop = time.time()
-            writing_to_excel_time += writing_to_excel_stop - writing_to_excel_start
-            # TODO: End context of measuring writing to excel (writing what?)
-
-    return tokenization_time, finding_match_time, writing_to_excel_time
+    return results
+    # return tokenization_time, finding_match_time, writing_to_excel_time
 
 
 if __name__ == '__main__':
@@ -249,8 +284,12 @@ if __name__ == '__main__':
     df_phrases = prepare_input_phrases_with_lemmas(lang_model, "Input/asd.xlsx")
     prepare_output_sheet('Output/Raport linkowania.xlsx')
 
-    tokenization_time, finding_match_time, writing_to_excel_time = \
-        create_inlinks_report(lang_model, url_list, df_phrases, input_class='entry-content')
+    # tokenization_time, finding_match_time, writing_to_excel_time = \
+    #     create_inlinks_report(queue, lang_model, url_list, df_phrases, input_class='entry-content')
+
+    create_inlinks_report(lang_model, url_list, df_phrases, input_class='entry-content')
+
+    print("Finished multiprocessing!")
 
     overall_stop = time.time()
     overall_time = overall_stop - overall_start
