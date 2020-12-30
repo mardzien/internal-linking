@@ -16,6 +16,7 @@ Przetwarzanie:
 from functools import partial
 
 import pandas as pd
+import numpy as np
 import spacy
 from spacy.matcher import PhraseMatcher
 import openpyxl
@@ -77,7 +78,8 @@ def prepare_input_phrases_with_lemmas(nlp_model, filepath: str):
 
 
 def prepare_output_sheet(filepath):
-    df_row = pd.DataFrame(columns=['URL źródłowy', 'URL docelowy', 'Słowo kluczowe', 'Kontekst'])
+    df_row = pd.DataFrame(columns=['URL źródłowy', 'Liczba linków', 'Liczba paragrafów', 'Link do strony docelowej',
+                                   'URL docelowy', 'Słowo kluczowe', 'Kontekst'])
     with pd.ExcelWriter(filepath) as writer:
         df_row.to_excel(writer, sheet_name='Raport')
 
@@ -158,12 +160,15 @@ def append_df_to_excel(filename, df, sheet_name='Sheet1', startrow=None,
     # save the workbook
     writer.save()
 
-# TODO: The function name is bad, because it doesn't tell too much about what it's doing FIXME.
-def process_url(nlp_model, matchers, destination_url_list, input_class, url):
+
+def get_match_df_from_single_url(nlp_model, matchers, destination_url_list, input_class, url):
     # print("Processing url:", url)
     url_info = get_information_from_soup(url=url, input_class=input_class)
     text = url_info['Tekst']
     document = nlp_model(text)
+    column_indexes = ['URL źródłowy', 'Liczba linków', 'Liczba paragrafów', 'Link do strony docelowej', 'URL docelowy',
+                      'Słowo kluczowe', 'Kontekst']
+    df = pd.DataFrame(columns=column_indexes)
 
     for d_url in destination_url_list:
         # print("Checking url:", d_url)
@@ -178,17 +183,25 @@ def process_url(nlp_model, matchers, destination_url_list, input_class, url):
             # print("Not found!")
             pass
         else:
-            rows = []
             for match_id, start, end in found_matches:  # tuple unpacking - potrzebujemy tylko start oraz end
                 phrase = document[start:end]  # fraza pokrewna znaleziona w tekście
                 span = document[start - 5:end + 6]  # tworzenie kontekstu dla znalezionej frazy
-                list_row = [url, d_url, phrase.text, span.text]
-                rows.append(list_row)
+
+
+                # df = df.append(pd.Series([url, np.NaN, np.NaN, 'Nie', d_url, phrase.text, span.text],
+                #                          index=column_indexes), ignore_index=True)
+
+
+
                 # append_list_to_excel(filename='Output/Raport linkowania.xlsx',
                 #                      list_name=list_row,
                 #                      sheet_name='Raport')
             print(f">>>>>>>>>> Found {len(found_matches)} matches!")
-    # print("Done")
+        # Tutaj lock nie powinien wyrządzić dużej szkody.
+        # lock
+        # append_df_to_excel(filename="Output/report.xlsx", df=df, sheet_name='Raport')
+        # lock
+    return df
 
 
 def init_matchers(nlp_model, database_df, destination_urls):
@@ -215,10 +228,9 @@ def create_inlinks_report(nlp_model, source_url_list, database_df, input_class):
     matchers = init_matchers(nlp_model, database_df, destination_url_list)
     print("Matchers initialized")
 
-    target = partial(process_url, nlp_model, matchers, destination_url_list, input_class)
+    target = partial(get_match_df_from_single_url, nlp_model, matchers, destination_url_list, input_class)
 
     proc_num = mp.cpu_count() - 1
-
     with mp.Pool(proc_num) as p:
         results = p.map(target, source_url_list)
 
@@ -228,11 +240,10 @@ def create_inlinks_report(nlp_model, source_url_list, database_df, input_class):
 if __name__ == '__main__':
     mo = m.Metrics('overall')
     mo.start()
-
-    lang_model = load_nlp_model("pl_core_news_sm")
-    url_list = load_url_list("Input1/url_list.txt")
-    df_phrases = prepare_input_phrases_with_lemmas(lang_model, "Input1/Morele_ahrefs.xlsx")
     prepare_output_sheet('Output/report.xlsx')
+    lang_model = load_nlp_model("pl_core_news_sm")
+    url_list = load_url_list("Input/url_list3.txt")
+    df_phrases = prepare_input_phrases_with_lemmas(lang_model, "Input/Morele_ahrefs.xlsx")
 
     create_inlinks_report(lang_model, url_list, df_phrases, input_class='single-news-container')
 
