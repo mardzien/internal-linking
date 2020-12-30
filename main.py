@@ -77,11 +77,9 @@ def prepare_input_phrases_with_lemmas(nlp_model, filepath: str):
     return phrase_database
 
 
-def prepare_output_sheet(filepath):
-    df_row = pd.DataFrame(columns=['URL źródłowy', 'Liczba linków', 'Liczba paragrafów', 'Link do strony docelowej',
-                                   'URL docelowy', 'Słowo kluczowe', 'Kontekst'])
+def write_df_to_excel(filepath, dataframe):
     with pd.ExcelWriter(filepath) as writer:
-        df_row.to_excel(writer, sheet_name='Raport')
+        dataframe.to_excel(writer, sheet_name='Raport')
 
 
 # TODO: Excel and dataframe part
@@ -187,20 +185,14 @@ def get_match_df_from_single_url(nlp_model, matchers, destination_url_list, inpu
                 phrase = document[start:end]  # fraza pokrewna znaleziona w tekście
                 span = document[start - 5:end + 6]  # tworzenie kontekstu dla znalezionej frazy
 
+                df = df.append(pd.Series([url, np.NaN, np.NaN, 'Nie', d_url, phrase.text, span.text],
+                                         index=column_indexes), ignore_index=True)
 
-                # df = df.append(pd.Series([url, np.NaN, np.NaN, 'Nie', d_url, phrase.text, span.text],
-                #                          index=column_indexes), ignore_index=True)
-
-
-
-                # append_list_to_excel(filename='Output/Raport linkowania.xlsx',
-                #                      list_name=list_row,
-                #                      sheet_name='Raport')
             print(f">>>>>>>>>> Found {len(found_matches)} matches!")
-        # Tutaj lock nie powinien wyrządzić dużej szkody.
-        # lock
-        # append_df_to_excel(filename="Output/report.xlsx", df=df, sheet_name='Raport')
-        # lock
+    # Tutaj lock nie powinien wyrządzić dużej szkody.
+    # lock
+    # append_df_to_excel(filename="Output/report.xlsx", df=df, sheet_name='Raport')
+    # lock
     return df
 
 
@@ -240,12 +232,14 @@ def create_inlinks_report(nlp_model, source_url_list, database_df, input_class):
 if __name__ == '__main__':
     mo = m.Metrics('overall')
     mo.start()
-    prepare_output_sheet('Output/report.xlsx')
     lang_model = load_nlp_model("pl_core_news_sm")
     url_list = load_url_list("Input/url_list3.txt")
     df_phrases = prepare_input_phrases_with_lemmas(lang_model, "Input/Morele_ahrefs.xlsx")
 
-    create_inlinks_report(lang_model, url_list, df_phrases, input_class='single-news-container')
+    df_results = create_inlinks_report(lang_model, url_list, df_phrases, input_class='single-news-container')
+    df = pd.concat(df_results)
+    df.reset_index(drop=True, inplace=True)
+    write_df_to_excel("Output/raporcik.xlsx", df)
 
     mo.stop()
     mo.report()
