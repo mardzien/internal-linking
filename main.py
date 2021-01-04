@@ -1,55 +1,36 @@
-"""
-Wejście:
-1. Lista URLi
-2. Baza fraz - para: fraza - URL
-Przetwarzanie:
-1. Wyciągamy podstawowe informacje z URLa z pkt 1, zwłaszcza tekst
-2. Tworzymy pusty słownik z kolumnami jakie chcemy na wyjściu
-3. Tworzymy nową kolumnę w bazie fraz z pkt 2, będącą kopią listy fraz
-4. Wrzucamy kolumnę z kopią fraz w funkcję do wyciągnięcia podstawowej formy frazy - lemmatizer
-5. Grupujemy frazy z pkt 2 po URLach (dla 1 URLa wyciągamy wszystkie frazy przypisane do niego)
-6. Tworzymy Matcher z ww. punktu w formie listy
-7. Na podstawie wcześniej uzyskanych danych (1.) oraz matchera  tworzymy wiersz wynikowy dla 2 sparowanych URLi
-   dla słownika z pkt 2.
-8. Zapisujemy
-"""
 from functools import partial
+import multiprocessing as mp
+import openpyxl
+from openpyxl import load_workbook
+import time
 
 import pandas as pd
 import numpy as np
 import spacy
 from spacy.matcher import PhraseMatcher
-import openpyxl
-import time
-
-from scrape import get_information_from_soup
-
-from openpyxl import load_workbook
-import multiprocessing as mp
 
 import files
 import metrics as m
+from scrape import get_information_from_soup
 
 
+# funkcja zwraca silnik nlp w zależności od stringa (mogą być różne języki lub różne modele dla jednego języka)
 def load_nlp_model(name: str):
     """
     Args:
         name: Language model name
     Returns: Language model object
     """
-    nlp_start = time.time()
     nlp = spacy.load(name)
-    nlp_end = time.time()
-    nlp_time = nlp_end - nlp_start
-    print(f"Wczytano silnik nlp w {nlp_time} s.")
     return nlp
 
 
+# ładowanie URLi z Inputu1 do listy
 def load_url_list(filepath: str):
     return files.load_file_to_list(filepath)
 
 
-# funkcja zwracająca podstawową formę danej frazy
+# funkcja pomocnicza potrzebna do stworzenie kolumny z podstawą słowotwórczą
 def lemmatizer(nlp_model, phrase):
     doc = nlp_model(str(phrase['Słowo kluczowe']))    # rzutowanie na stringa. Wartości liczbowe mogą być wczytywane jako float.
     result = ""
@@ -58,6 +39,7 @@ def lemmatizer(nlp_model, phrase):
     return result[:-1]
 
 
+# funkcja przerabiająca Input 2 z URL + Słowo kluczowe na URL + podstawa słowotwórcza
 def prepare_input_phrases_with_lemmas(nlp_model, filepath: str):
     """
     Loads xlsx file into pandas dataframe and adds lemmas in new column.
@@ -77,14 +59,14 @@ def prepare_input_phrases_with_lemmas(nlp_model, filepath: str):
     return phrase_database
 
 
+#Funkcja zapisująca df do arkusza z odpowiednimi parametrami
 def write_df_to_excel(filepath, dataframe):
-    with pd.ExcelWriter(filepath) as writer:
+    # parametr 'strings_to_urls': False jest konieczny ze względu na limit URLi w jednym arkuszu ( limit to 65K URLi)
+    with pd.ExcelWriter(filepath, options={'strings_to_urls': False}) as writer:
         dataframe.to_excel(writer, sheet_name='Raport')
 
 
-# TODO: Excel and dataframe part
-
-
+# funkcja obecnie nie jest już używana
 def append_list_to_excel(filename, list_name, sheet_name):
     columns = "BCDE"
     wb = openpyxl.load_workbook(filename)
@@ -96,6 +78,7 @@ def append_list_to_excel(filename, list_name, sheet_name):
     wb.save(filename)
 
 
+# funkcja obecnie nie jest już używana
 def append_df_to_excel(filename, df, sheet_name='Sheet1', startrow=None,
                        truncate_sheet=False,
                        **to_excel_kwargs):
@@ -159,6 +142,7 @@ def append_df_to_excel(filename, df, sheet_name='Sheet1', startrow=None,
     writer.save()
 
 
+# funkcja z mechanizmem dobierania Inputu 2 dla pojedynczego URLa
 def get_match_df_from_single_url(nlp_model, matchers, destination_url_list, input_class, url):
     # print("Processing url:", url)
     url_info = get_information_from_soup(url=url, input_class=input_class)
@@ -196,6 +180,8 @@ def get_match_df_from_single_url(nlp_model, matchers, destination_url_list, inpu
     return df
 
 
+# funkcja inicjująca matchery i zapisująca je w słowniku
+# bardzo zasobochłonna i czasochłonna
 def init_matchers(nlp_model, database_df, destination_urls):
     d = dict()
     mtr = m.Metrics('matcher')
@@ -211,6 +197,7 @@ def init_matchers(nlp_model, database_df, destination_urls):
     return d
 
 
+# funkcja wykorzystuje multiprocessing- łączy cały input1 z inputem2, procesy różnią się od siebie URLami z inputu1
 def create_inlinks_report(nlp_model, source_url_list, database_df, input_class):
     mp.set_start_method('spawn', True)
 
@@ -222,6 +209,7 @@ def create_inlinks_report(nlp_model, source_url_list, database_df, input_class):
 
     target = partial(get_match_df_from_single_url, nlp_model, matchers, destination_url_list, input_class)
 
+    # liczba procesów na danej maszynie - 1, ze względu na jeden proces sterujący programem
     proc_num = mp.cpu_count() - 1
     with mp.Pool(proc_num) as p:
         results = p.map(target, source_url_list)
