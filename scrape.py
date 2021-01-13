@@ -23,21 +23,23 @@ def get_information_from_soup(url, input_class):
     info["Liczba znaków"] = len(lower_text_result)
 
     # getting all links
-    # link_tags = raw_text[0].find_all('a')
+    link_tags = raw_text[0].find_all('a')
+    paragraph_tags = raw_text[0].find_all('p')
+    info["Liczba paragrafów"] = len(paragraph_tags)
+    info["Liczba linków"] = len(link_tags)
 
-    # number_of_paragraphs = len(raw_text[0].find_all('p'))
-    # info["Liczba paragrafów"] = number_of_paragraphs
-    # info["Liczba linków"] = len(link_tags)
-    # # creating list of href
-    # href_list = []
-    # for link in link_tags:
-    #     try:
-    #         href_list.append(f"{link['href']} ---> {link.contents[0]}")
-    #         if link['href'] == url:
-    #             info["Linkuje na siebie"] = "Tak"
-    #     except:
-    #         continue
-    #
-    # info["Tablica linków"] = href_list
+    if len(link_tags) > 1:
+        href_list = []
+        for link in link_tags:
+            try:
+                href_list.append(link['href'])
+                if link['href'] == url:
+                    info["Linkuje na siebie"] = "Tak"
+            except:
+                continue
+
+        info["Tablica linków"] = href_list
+    else:
+        info["Tablica linków"] = []
 
     return info

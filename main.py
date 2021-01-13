@@ -147,13 +147,20 @@ def get_match_df_from_single_url(nlp_model, matchers, destination_url_list, inpu
     # print("Processing url:", url)
     url_info = get_information_from_soup(url=url, input_class=input_class)
     text = url_info['Tekst']
+    number_of_links = url_info['Liczba linków']
+    number_of_paragraphs = url_info['Liczba paragrafów']
+    href_list = url_info['Tablica linków']
+
     document = nlp_model(text)
     column_indexes = ['URL źródłowy', 'Liczba linków', 'Liczba paragrafów', 'Link do strony docelowej', 'URL docelowy',
                       'Słowo kluczowe', 'Kontekst']
     df = pd.DataFrame(columns=column_indexes)
 
     for d_url in destination_url_list:
-        # print("Checking url:", d_url)
+        links_to_d_url = "Nie"
+        for href in href_list:
+            if href == d_url:
+                links_to_d_url = "Tak"
         if url == d_url:
             print(">>>>>>>>>> Self matched!")
             continue  # przerwanie pętli, żeby nie szukać dopasowań na siebie.
@@ -167,10 +174,13 @@ def get_match_df_from_single_url(nlp_model, matchers, destination_url_list, inpu
         else:
             for match_id, start, end in found_matches:  # tuple unpacking - potrzebujemy tylko start oraz end
                 phrase = document[start:end]  # fraza pokrewna znaleziona w tekście
-                span = document[start - 5:end + 6]  # tworzenie kontekstu dla znalezionej frazy
+                try:
+                    span = document[start - 5:end + 6].text  # tworzenie kontekstu dla znalezionej frazy
+                except:
+                    span = ""
 
-                df = df.append(pd.Series([url, np.NaN, np.NaN, 'Nie', d_url, phrase.text, span.text],
-                                         index=column_indexes), ignore_index=True)
+                df = df.append(pd.Series([url, number_of_links, number_of_paragraphs, links_to_d_url, d_url,
+                                          phrase.text, span], index=column_indexes), ignore_index=True)
 
             print(f">>>>>>>>>> Found {len(found_matches)} matches!")
     # Tutaj lock nie powinien wyrządzić dużej szkody.
@@ -221,13 +231,14 @@ if __name__ == '__main__':
     mo = m.Metrics('overall')
     mo.start()
     lang_model = load_nlp_model("pl_core_news_sm")
-    url_list = load_url_list("Input/url_list3.txt")
-    df_phrases = prepare_input_phrases_with_lemmas(lang_model, "Input/Morele_ahrefs.xlsx")
+    url_list = load_url_list("Input/url_list2.txt")
+    df_phrases = prepare_input_phrases_with_lemmas(lang_model, "Input/Renee_nowe_kategorie.xlsx")
 
-    df_results = create_inlinks_report(lang_model, url_list, df_phrases, input_class='single-news-container')
+    df_results = create_inlinks_report(lang_model, url_list, df_phrases,
+                                       input_class='eltd-post-text-inner')
     df = pd.concat(df_results)
     df.reset_index(drop=True, inplace=True)
-    write_df_to_excel("Output/raporcik.xlsx", df)
+    write_df_to_excel("Output/Renee_blog.xlsx", df)
 
     mo.stop()
     mo.report()
